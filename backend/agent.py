@@ -41,12 +41,11 @@ def log_interaction(hcp_id: Union[int, str], interaction_type: str, raw_text: st
             return f"Error: HCP with ID {hcp_id} not found."
             
         extraction_prompt = (
-            f"Extract structured data from this CRM interaction log:\n\n{raw_text}\n\n"
-            "Return ONLY a valid, plain JSON object (no markdown, no extra text) with double-quoted keys and values. "
-            "Fields: date (YYYY-MM-DD), time (HH:mm), attendees, topics_discussed, summary, sentiment (Positive/Neutral/Negative), "
-            "materials_shared (list), samples_distributed (list), outcomes, next_steps. "
-            "IMPORTANT: If 'outcomes' is null or missing in the text, GENERATE a brief professional outcome based on the discussion and sentiment. "
-            "If unknown, use null."
+            f"Extract structured data from this interaction: {raw_text}\n\n"
+            "Respond with ONLY a valid JSON object. Do not include markdown or extra text. "
+            "Fields: date(YYYY-MM-DD), time(HH:mm), attendees(string), topics_discussed(string), summary(string), "
+            "sentiment(Positive/Neutral/Negative), materials_shared(list), samples_distributed(list), outcomes(string), next_steps(string). "
+            "If outcome is missing, GENERATE a brief professional one. Use null for unknown fields."
         )
 
         response = llm.invoke([HumanMessage(content=extraction_prompt)])
@@ -154,13 +153,11 @@ def call_model(state: AgentState):
     interaction_id = state.get('interaction_id', 0)
     
     system_msg = (
-        "You are an AI-First CRM Assistant. "
-        f"Context: HCP ID={hcp_id}, Interaction ID={interaction_id}. Time: {datetime.now().strftime('%H:%M %Y-%m-%d')}. "
-        "PRIORITY: When a user describes a conversation or meeting, ALWAYS use 'log_interaction' FIRST. "
-        "1. To log new details, use 'log_interaction'. It will auto-generate an 'outcome' if you don't provide one. "
-        "2. To update specific fields of the current interaction, use 'edit_interaction' with the context Interaction ID. "
-        "3. Supported fields for edit: date, time, attendees, topics_discussed, sentiment, outcomes, next_steps. "
-        "4. DO NOT include raw JSON in your natural language text. Keep your text response clean and conversational."
+        "You are a professional CRM Assistant. "
+        f"Context: HCP ID={hcp_id}, Interaction ID={interaction_id}. "
+        "1. Log new: 'log_interaction'. 2. Update existing: 'edit_interaction'. "
+        "3. NEVER use words like 'STOP' or 'CONFIRMED' in your text response. "
+        "4. Be conversational but brief. After a tool result appears, confirm the update and finish."
     )
 
     

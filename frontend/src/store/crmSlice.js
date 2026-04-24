@@ -13,7 +13,7 @@ export const sendMessage = createAsyncThunk('crm/sendMessage', async ({ message,
   const response = await axios.post(`${API_BASE}/chat`, { 
     message, 
     hcp_id: hcpId,
-  history: chatHistory.slice(-6).map(m => ({ role: m.role, content: m.content }))
+  history: chatHistory.slice(-4).map(m => ({ role: m.role, content: m.content }))
   });
   return { message, response: response.data.response };
 });

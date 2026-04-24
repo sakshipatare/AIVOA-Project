@@ -8,6 +8,7 @@ from agent import agent
 from langchain_core.messages import HumanMessage, AIMessage
 
 import uvicorn
+import json
 
 # Initialize and Seed Database
 try:
@@ -112,34 +113,48 @@ async def chat_with_agent(request: ChatRequest, db: Session = Depends(get_db)):
                 else:
                     past_messages.append(AIMessage(content=msg.content))
 
+        # Extract last interaction_id from history to maintain context
+        interaction_id = 0
+        if request.history:
+            for msg in reversed(request.history):
+                if msg.role == 'ai' and "Interaction logged successfully with ID" in msg.content:
+                    try:
+                        interaction_id = int(msg.content.split("ID")[1].split(".")[0].strip())
+                        break
+                    except:
+                        pass
+
         # Invoke LangGraph agent
         input_state = {
             "messages": past_messages + [HumanMessage(content=request.message)],
             "hcp_id": request.hcp_id or 0,
-            "interaction_id": 0
+            "interaction_id": interaction_id
         }
         result = agent.invoke(input_state)
         
         # Extract the text response and check for UI_UPDATE_DATA
         ai_message = ""
-        ui_update_data = None
+        all_ui_updates = {}
         
         # Look through all messages in the result to find tool outputs or agent markers
-        for msg in reversed(result['messages']):
-            if hasattr(msg, 'content'):
-                if "UI_UPDATE_DATA:" in msg.content:
-                    try:
-                        ui_update_data = msg.content.split("UI_UPDATE_DATA:")[1].strip()
-                    except:
-                        pass
+        for msg in result['messages']:
+            content = msg.content if hasattr(msg, 'content') else str(msg)
+            
+            if "UI_UPDATE_DATA:" in content:
+                try:
+                    json_str = content.split("UI_UPDATE_DATA:")[1].strip()
+                    # Clean markdown if present
+                    json_str = json_str.replace('```json', '').replace('```', '').strip()
+                    update_data = json.loads(json_str)
+                    if isinstance(update_data, dict):
+                        all_ui_updates.update(update_data)
+                except Exception as e:
+                    print(f"Error parsing UI_UPDATE_DATA: {e}")
 
-                
-                # Use the last AIMessage as the actual text response
-                if not ai_message and isinstance(msg, (AIMessage, str)) or (hasattr(msg, 'role') and msg.role == 'ai'):
-                   # Check if it's an AIMessage object from langchain
-                   content = msg.content if hasattr(msg, 'content') else str(msg)
-                   if content and "UI_UPDATE_DATA:" not in content[:50]: # Avoid tool-only messages
-                       ai_message = content.split("UI_UPDATE_DATA:")[0].strip()
+            # Use the last AIMessage as the actual text response
+            if isinstance(msg, (AIMessage, str)) or (hasattr(msg, 'role') and msg.role == 'ai'):
+               if content and "UI_UPDATE_DATA:" not in content[:50]: # Avoid tool-only messages
+                   ai_message = content.split("UI_UPDATE_DATA:")[0].strip()
 
         # Fallback if no clean AI message found
         if not ai_message:
@@ -148,8 +163,8 @@ async def chat_with_agent(request: ChatRequest, db: Session = Depends(get_db)):
 
         # If we found update data, ensure it's in the final response
         final_response = ai_message
-        if ui_update_data and "UI_UPDATE_DATA:" not in final_response:
-            final_response += f"\n\nUI_UPDATE_DATA: {ui_update_data}"
+        if all_ui_updates:
+            final_response += f"\n\nUI_UPDATE_DATA: {json.dumps(all_ui_updates)}"
 
         return {"response": final_response}
 

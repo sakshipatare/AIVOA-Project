@@ -24,10 +24,10 @@ class AgentState(TypedDict):
 # --- Tools ---
 
 @tool
-def log_interaction_tool(hcp_id: Union[int, str], interaction_type: str, raw_text: str):
+def log_interaction(hcp_id: Union[int, str], interaction_type: str, raw_text: str):
     """
-    Groups and summarizes the interaction details from raw input and saves it to the database.
-    Input: hcp_id, interaction_type (Meeting/Call/Email), raw_text (the content of the interaction).
+    Saves a new interaction log to the database.
+    Inputs: hcp_id, interaction_type (Meeting/Call/Email), raw_text (details).
     """
     db = SessionLocal()
     try:
@@ -45,6 +45,7 @@ def log_interaction_tool(hcp_id: Union[int, str], interaction_type: str, raw_tex
             "Return ONLY a valid, plain JSON object (no markdown, no extra text) with double-quoted keys and values. "
             "Fields: date (YYYY-MM-DD), time (HH:mm), attendees, topics_discussed, summary, sentiment (Positive/Neutral/Negative), "
             "materials_shared (list), samples_distributed (list), outcomes, next_steps. "
+            "IMPORTANT: If 'outcomes' is null or missing in the text, GENERATE a brief professional outcome based on the discussion and sentiment. "
             "If unknown, use null."
         )
 
@@ -66,10 +67,10 @@ def log_interaction_tool(hcp_id: Union[int, str], interaction_type: str, raw_tex
         db.close()
 
 @tool
-def edit_interaction_tool(interaction_id: Union[int, str], field: str, value: str):
+def edit_interaction(interaction_id: Union[int, str], field: str, value: str):
     """
-    Modifies an existing interaction log.
-    Input: interaction_id, field (e.g., summary, sentiment, outcomes), value.
+    Updates a specific field in an existing interaction log.
+    Fields: date, time, attendees, topics_discussed, sentiment, outcomes, next_steps.
     """
     db = SessionLocal()
     try:
@@ -82,13 +83,13 @@ def edit_interaction_tool(interaction_id: Union[int, str], field: str, value: st
         if interaction:
             setattr(interaction, field, value)
             db.commit()
-            return f"Updated {field} for interaction {interaction_id}"
+            return f"Updated {field} for interaction {interaction_id}. UI_UPDATE_DATA: {{\"{field}\": \"{value}\"}}"
         return "Interaction not found"
     finally:
         db.close()
 
 @tool
-def get_hcp_info_tool(hcp_name: str):
+def get_hcp_info(hcp_name: str):
     """
     Retrieves profile and history for a specific HCP.
     """
@@ -97,18 +98,15 @@ def get_hcp_info_tool(hcp_name: str):
         hcp = db.query(HCP).filter(HCP.name.ilike(f"%{hcp_name}%")).first()
         if hcp:
             history = db.query(Interaction).filter(Interaction.hcp_id == hcp.id).all()
-            return {
-                "id": hcp.id,
-                "name": hcp.name,
-                "specialty": hcp.specialty,
-                "history_count": len(history)
-            }
+        if hcp:
+            history = db.query(Interaction).filter(Interaction.hcp_id == hcp.id).all()
+            return f"HCP Profile: Name={hcp.name}, Specialty={hcp.specialty}, History Count={len(history)}"
         return "HCP not found"
     finally:
         db.close()
 
 @tool
-def generate_followup_tool(interaction_id: Union[int, str]):
+def generate_followup(interaction_id: Union[int, str]):
     """
     Generates a personalized follow-up email/task based on the interaction.
     """
@@ -130,7 +128,7 @@ def generate_followup_tool(interaction_id: Union[int, str]):
         db.close()
 
 @tool
-def search_materials_tool(query: str):
+def search_materials(query: str):
     """
     Searches for relevant product brochures or scientific papers.
     """
@@ -140,28 +138,29 @@ def search_materials_tool(query: str):
         "Efficacy of Product X in Post-Op Recovery.docx",
         "HCP Presentation - Q4 2025.pptx"
     ]
-    return [m for m in materials if query.lower() in m.lower()]
+    results = [m for m in materials if query.lower() in m.lower()]
+    return ", ".join(results) if results else "No matching materials found."
 
 from langgraph.prebuilt import ToolNode, tools_condition
 
 # --- Agent Flow ---
 
-tools = [log_interaction_tool, edit_interaction_tool, get_hcp_info_tool, generate_followup_tool, search_materials_tool]
+tools = [log_interaction, edit_interaction, get_hcp_info, generate_followup, search_materials]
 llm_with_tools = llm.bind_tools(tools)
 
 def call_model(state: AgentState):
     messages = state['messages']
     hcp_id = state['hcp_id']
+    interaction_id = state.get('interaction_id', 0)
     
     system_msg = (
-        "You are an AI-First CRM Assistant for life sciences field reps. "
-        f"The current HCP ID in context is the INTEGER: {hcp_id}. "
-        f"The current date and time is: {datetime.now().strftime('%Y-%m-%d %H:%M')}. "
-        "When logging an interaction, you MUST pass the hcp_id as a literal integer. "
-        "When a user describes an interaction, use the log_interaction_tool EXACTLY ONCE. "
-        "If you see the tool output in the history, DO NOT call it again for the same description. "
-        "Instead, provide a natural language confirmation to the user. "
-        "Ensure the final response (the confirmation) contains the UI_UPDATE_DATA: {json} marker from the tool output."
+        "You are an AI-First CRM Assistant. "
+        f"Context: HCP ID={hcp_id}, Interaction ID={interaction_id}. Time: {datetime.now().strftime('%H:%M %Y-%m-%d')}. "
+        "PRIORITY: When a user describes a conversation or meeting, ALWAYS use 'log_interaction' FIRST. "
+        "1. To log new details, use 'log_interaction'. It will auto-generate an 'outcome' if you don't provide one. "
+        "2. To update specific fields of the current interaction, use 'edit_interaction' with the context Interaction ID. "
+        "3. Supported fields for edit: date, time, attendees, topics_discussed, sentiment, outcomes, next_steps. "
+        "4. DO NOT include raw JSON in your natural language text. Keep your text response clean and conversational."
     )
 
     

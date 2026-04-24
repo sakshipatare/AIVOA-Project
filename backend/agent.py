@@ -65,11 +65,14 @@ def log_interaction(hcp_id: Union[int, str], interaction_type: str, raw_text: st
     finally:
         db.close()
 
+import json
+
 @tool
-def edit_interaction(interaction_id: Union[int, str], field: str, value: str):
+def edit_interaction(interaction_id: Union[int, str], updates_json: str):
     """
-    Updates a specific field in an existing interaction log.
-    Fields: date, time, attendees, topics_discussed, sentiment, outcomes, next_steps.
+    Updates one or multiple fields in an existing interaction log.
+    Provide updates_json as a valid JSON string containing the fields to update.
+    Fields allowed: date, time, attendees, topics_discussed, sentiment, outcomes, next_steps.
     """
     db = SessionLocal()
     try:
@@ -80,9 +83,15 @@ def edit_interaction(interaction_id: Union[int, str], field: str, value: str):
             
         interaction = db.query(Interaction).filter(Interaction.id == interaction_id).first()
         if interaction:
-            setattr(interaction, field, value)
-            db.commit()
-            return f"Updated {field} for interaction {interaction_id}. UI_UPDATE_DATA: {{\"{field}\": \"{value}\"}}"
+            try:
+                updates = json.loads(updates_json)
+                for field, value in updates.items():
+                    if hasattr(interaction, field):
+                        setattr(interaction, field, value)
+                db.commit()
+                return f"Interaction updated successfully. UI_UPDATE_DATA: {json.dumps(updates)}"
+            except Exception as e:
+                return f"Error parsing updates_json: {e}"
         return "Interaction not found"
     finally:
         db.close()
@@ -155,7 +164,8 @@ def call_model(state: AgentState):
     system_msg = (
         "You are a professional CRM Assistant. "
         f"Context: HCP ID={hcp_id}, Interaction ID={interaction_id}. "
-        "1. Log new: 'log_interaction'. 2. Update existing: 'edit_interaction'. "
+        "1. Log new: 'log_interaction'. "
+        "2. Update existing: use 'edit_interaction' and pass ALL fields to update as a single JSON string in 'updates_json'. "
         "3. NEVER use words like 'STOP' or 'CONFIRMED' in your text response. "
         "4. Be conversational but brief. After a tool result appears, confirm the update and finish."
     )

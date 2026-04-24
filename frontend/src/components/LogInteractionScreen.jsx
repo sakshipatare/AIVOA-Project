@@ -102,11 +102,16 @@ const LogInteractionScreen = () => {
         setFormData(prev => ({
           ...prev,
           ...Object.keys(extractedData).reduce((acc, key) => {
-            if (extractedData[key] !== null) {
-              let value = extractedData[key];
-              if (key === 'time') value = formatTimeTo24h(value);
-              if (key === 'date') value = formatDateYYYYMMDD(value);
-              acc[key] = value;
+            const val = extractedData[key];
+            if (val !== null && val !== 'null' && val !== undefined && val !== '') {
+              let parsedValue = val;
+              if (key === 'time') parsedValue = formatTimeTo24h(parsedValue);
+              if (key === 'date') parsedValue = formatDateYYYYMMDD(parsedValue);
+              
+              // Only overwrite if it actually holds data.
+              if (parsedValue !== null && parsedValue !== 'null' && parsedValue !== '') {
+                  acc[key] = parsedValue;
+              }
             }
             return acc;
           }, {})

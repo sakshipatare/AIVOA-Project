@@ -8,8 +8,13 @@ export const fetchHCPs = createAsyncThunk('crm/fetchHCPs', async () => {
   return response.data;
 });
 
-export const sendMessage = createAsyncThunk('crm/sendMessage', async ({ message, hcpId }) => {
-  const response = await axios.post(`${API_BASE}/chat`, { message, hcp_id: hcpId });
+export const sendMessage = createAsyncThunk('crm/sendMessage', async ({ message, hcpId }, { getState }) => {
+  const { chatHistory } = getState().crm;
+  const response = await axios.post(`${API_BASE}/chat`, { 
+    message, 
+    hcp_id: hcpId,
+    history: chatHistory.map(m => ({ role: m.role, content: m.content }))
+  });
   return { message, response: response.data.response };
 });
 

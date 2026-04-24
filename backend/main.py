@@ -5,7 +5,8 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict
 from models import HCP, Interaction, engine, Base, get_db, SessionLocal
 from agent import agent
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
+
 import uvicorn
 
 # Initialize and Seed Database
@@ -56,16 +57,30 @@ class HCPResponse(HCPBase):
 class InteractionBase(BaseModel):
     hcp_id: int
     type: str
-    summary: Optional[str]
-    sentiment: Optional[str]
-    raw_transcript: Optional[str]
+    date: Optional[str] = None
+    time: Optional[str] = None
+    attendees: Optional[str] = None
+    topics_discussed: Optional[str] = None
+    summary: Optional[str] = None
+    sentiment: Optional[str] = None
+    materials_shared: Optional[List[str]] = None
+    samples_distributed: Optional[List[str]] = None
+    outcomes: Optional[str] = None
+    next_steps: Optional[str] = None
+    raw_transcript: Optional[str] = None
+
 
 class InteractionCreate(InteractionBase):
     pass
 
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
 class ChatRequest(BaseModel):
     message: str
     hcp_id: Optional[int] = None
+    history: Optional[List[ChatMessage]] = None
 
 # --- Endpoints ---
 
@@ -88,16 +103,56 @@ def get_interactions(hcp_id: int, db: Session = Depends(get_db)):
 @app.post("/chat")
 async def chat_with_agent(request: ChatRequest, db: Session = Depends(get_db)):
     try:
+        # Map history to langchain messages
+        past_messages = []
+        if request.history:
+            for msg in request.history:
+                if msg.role == 'user':
+                    past_messages.append(HumanMessage(content=msg.content))
+                else:
+                    past_messages.append(AIMessage(content=msg.content))
+
         # Invoke LangGraph agent
         input_state = {
-            "messages": [HumanMessage(content=request.message)],
+            "messages": past_messages + [HumanMessage(content=request.message)],
             "hcp_id": request.hcp_id or 0,
             "interaction_id": 0
         }
         result = agent.invoke(input_state)
-        # get the last message from the agent
-        ai_message = result['messages'][-1].content
-        return {"response": ai_message}
+        
+        # Extract the text response and check for UI_UPDATE_DATA
+        ai_message = ""
+        ui_update_data = None
+        
+        # Look through all messages in the result to find tool outputs or agent markers
+        for msg in reversed(result['messages']):
+            if hasattr(msg, 'content'):
+                if "UI_UPDATE_DATA:" in msg.content:
+                    try:
+                        ui_update_data = msg.content.split("UI_UPDATE_DATA:")[1].strip()
+                    except:
+                        pass
+
+                
+                # Use the last AIMessage as the actual text response
+                if not ai_message and isinstance(msg, (AIMessage, str)) or (hasattr(msg, 'role') and msg.role == 'ai'):
+                   # Check if it's an AIMessage object from langchain
+                   content = msg.content if hasattr(msg, 'content') else str(msg)
+                   if content and "UI_UPDATE_DATA:" not in content[:50]: # Avoid tool-only messages
+                       ai_message = content.split("UI_UPDATE_DATA:")[0].strip()
+
+        # Fallback if no clean AI message found
+        if not ai_message:
+            last_msg = result['messages'][-1]
+            ai_message = last_msg.content.split("UI_UPDATE_DATA:")[0].strip() if hasattr(last_msg, 'content') else str(last_msg)
+
+        # If we found update data, ensure it's in the final response
+        final_response = ai_message
+        if ui_update_data and "UI_UPDATE_DATA:" not in final_response:
+            final_response += f"\n\nUI_UPDATE_DATA: {ui_update_data}"
+
+        return {"response": final_response}
+
     except Exception as e:
         print(f"Error in chat endpoint: {e}")
         error_msg = str(e)

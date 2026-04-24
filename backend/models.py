@@ -33,15 +33,20 @@ class Interaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     hcp_id = Column(Integer, ForeignKey("hcps.id"))
     date = Column(DateTime, default=datetime.utcnow)
+    time = Column(String, nullable=True) # HH:MM format
     type = Column(String) # Meeting, Call, Email
-    summary = Column(Text)
+    attendees = Column(String, nullable=True)
+    topics_discussed = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
     sentiment = Column(String) # Positive, Neutral, Negative
-    materials_shared = Column(JSON) # List of documents/samples
-    outcomes = Column(Text)
-    next_steps = Column(Text)
+    materials_shared = Column(JSON, nullable=True) # List of documents/samples
+    samples_distributed = Column(JSON, nullable=True) # List of samples
+    outcomes = Column(Text, nullable=True)
+    next_steps = Column(Text, nullable=True)
     raw_transcript = Column(Text, nullable=True) # For AI processing
     
     hcp = relationship("HCP", back_populates="interactions")
+
 
 def get_db():
     db = SessionLocal()
